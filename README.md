@@ -176,7 +176,7 @@ To maintain type safety between the frontend and backend, it is crucial to have 
     };
     ```
 
-3. **Comparing with Hashes**: In order to prevent redundant uploads, we compare the MD5 checksum of the local and remote files to avoid uploading the schema file if it has not changed. This reduces unnecessary operations and bandwidth usage and ensures that only modified schema files are uploaded.
+3. **Comparing with md5Checksums**: In order to prevent redundant uploads, we compare the md5 checksum of the local and remote files to avoid uploading the schema file if it has not changed. This reduces unnecessary operations and bandwidth usage and ensures that only modified schema files are uploaded.
 
     First, compute the checksum of the local file to identify its unique hash. Then, fetch the checksum of the existing file on Google Drive and compare them. If they don't match, an upload is needed.
 
@@ -192,11 +192,18 @@ To maintain type safety between the frontend and backend, it is crucial to have 
     // Compare with remote file checksum retrieved from Google Drive
     ```
 
-4. **Attaching Hashes to Names**: Attaching a unique hash to the file name helps in managing different versions of the schema file. This prevents name collisions and ensures that each version of the file is distinct.
+4. **Attaching md5Checksums to Names**: Attaching the md5Checksum of the file to its name helps in managing different versions of the schema file. This prevents name collisions and ensures that each version of the file is distinct.
 
     ```ts
-    const randomHash = crypto.randomBytes(6).toString('hex');
-    const fileName = `schema-${branchName}-${randomHash}.json`;
+    private async getFileChecksum(filePath: string): Promise<string> {
+        const fileBuffer = await fsp.readFile(filePath);
+        const hash = crypto.createHash('md5');
+        hash.update(fileBuffer);
+        return hash.digest('hex');
+    }
+  
+    const localFileChecksum = await this.getFileChecksum(localFilePath);
+    const fileName = `schema-${branchName}-${localFileChecksum}.json`;
     ```
 
 5. **Abstracting the Upload Process**: To make the schema upload process more flexible and maintainable, an abstract approach is employed. This allows for easy integration with different storage services without modifying the core upload logic. 
@@ -317,32 +324,30 @@ To maintain type safety between the frontend and backend, it is crucial to have 
       async uploadFile(): Promise<void> {
         const branchName = execSync('git rev-parse --abbrev-ref HEAD').toString().trim();
         const localFilePath = 'http/output/swagger.json';
-
+    
         try {
           const files = await this.storageService.listFiles(`name contains '${branchName}-' and trashed=false`);
-
+    
           if (files.length > 0) {
             const { id: remoteFileId, name: remoteFileName, md5Checksum: remoteFileChecksum } = files[0];
             const localFileChecksum = await this.getFileChecksum(localFilePath);
-
+    
             if (localFileChecksum === remoteFileChecksum) {
               console.log(`File ${remoteFileName} is the same as the local file. Skipping upload.`);
               return;
             }
-
-            const randomHash = crypto.randomBytes(6).toString('hex');
-            const newFileName = `schema-${branchName}-${randomHash}.json`;
-
+    
+            const newFileName = `schema-${branchName}-${localFileChecksum}.json`;
+    
             await this.storageService.updateFile(remoteFileId, newFileName, localFilePath);
             console.log('Updated file with Id:', remoteFileId);
           } else {
-            const randomHash = crypto.randomBytes(6).toString('hex');
-            const fileName = `schema-${branchName}-${randomHash}.json`;
-
+            const fileName = `schema-${branchName}-${localFileChecksum}.json`;
+    
             const fileId = await this.storageService.createFile(fileName, localFilePath);
             console.log('Uploaded new file with Id:', fileId);
           }
-
+    
         } catch (error) {
           console.error('Error:', error);
         }
@@ -485,9 +490,9 @@ client.use(myInterceptor);
 Fetching the schema from Google Drive involves retrieving the latest OpenAPI schema file, comparing it with the local version, and updating the local schema if necessary. This process ensures that the frontend is always using the most current schema, maintaining type safety across the application. Additionally, the method is designed to prevent redundant fetching of the schema file, which saves on network resources and processing time.
 
 1. **Fetch Schema from Google Drive**: To fetch the schema, we use the Google Drive API to list files and download the relevant schema file. This step involves authenticating with Google Drive, listing files in the desired folder, and retrieving the latest schema file based on its name.
-2. **Compare Local and Remote Hashes**: To prevent redundant fetching, we compare the hash of the local file that is stored in the .env.local file with the hash embedded in the file name of the remote schema. This ensures that the file is only downloaded if it has changed.
+2. **Compare Local and Remote md5 Checksums**: To prevent redundant fetching, we compare the md5Checksum of the local file that is stored in .env.local with the md5 Checksum embedded in the file name of the remote schema. This ensures that the file is only downloaded if it has changed.
     ```ts
-    const localHash = process.env['HASH_STRING'];
+    const localHash = process.env['CHECKSUM_STRING'];
 
     const latestFileName = latestFile.name;
     const remoteHash = latestFileName.split('-').pop()?.replace('.json', '');
@@ -559,50 +564,50 @@ Fetching the schema from Google Drive involves retrieving the latest OpenAPI sch
           console.error('No new hash to update.');
           return;
         }
-
+    
         const envPath = '.env.local';
         let envContent = fs.readFileSync(envPath, 'utf-8');
-        const hashLinePattern = /^HASH_STRING = .*/m;
-        const newHashLine = `HASH_STRING = ${newHash}`;
-
+        const hashLinePattern = /^CHECKSUM_STRING = .*/m;
+        const newHashLine = `CHECKSUM_STRING = ${newHash}`;
+    
         if (hashLinePattern.test(envContent)) {
           envContent = envContent.replace(hashLinePattern, newHashLine);
         } else {
           envContent += `\n${newHashLine}`;
         }
-
+    
         fs.writeFileSync(envPath, envContent, 'utf-8');
         console.log('Updated .env.local with new hash number:', newHash);
       }
-
+    
       async fetchFile(): Promise<void> {
         const branchName = process.env['BRANCH_NAME'];
-        const localHash = process.env['HASH_STRING'];
+        const localHash = process.env['CHECKSUM_STRING'];
         const sourceFilePrefix = `schema-${branchName}`;
         const destinationFilePath = 'src/Schema/schema.json';
-
+    
         try {
           const files = await this.storageService.listFiles(`'${process.env['DRIVE_FOLDER_ID']}' in parents and trashed=false`);
-
+    
           if (files.length > 0) {
             let latestFile: { id: string, name: string } | null = null;
-
+    
             for (const file of files) {
               if (file.name && file.name.startsWith(sourceFilePrefix)) {
                 latestFile = file;
                 break;
               }
             }
-
+    
             if (latestFile && latestFile.id) {
               const latestFileName = latestFile.name;
               const remoteHash = latestFileName.split('-').pop()?.replace('.json', '');
-
+    
               if (localHash === remoteHash) {
                 console.log(`Local file hash (${localHash}) is already the latest. Skipping download.`);
                 return;
               }
-
+    
               await this.storageService.getFile(latestFile.id, destinationFilePath);
               console.log('File downloaded successfully.');
               this.updateEnvFile(remoteHash);
