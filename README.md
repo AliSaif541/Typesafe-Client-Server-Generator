@@ -1,4 +1,4 @@
-# Typesafe(Swagger) Client Generator
+# Typesafety between Client and Server
 ## Introduction
 The main purpose of this project is to achieve type safety between the frontend and backend. Often, backend developers make changes to types or introduce new variables without informing the frontend developers, resulting in crashes when the frontend runs due to type mismatches. This project ensures type safety by automatically generating and uploading a new schema whenever backend code is committed. On the frontend, this new schema is fetched before building or committing code. If there are any changes, build errors will occur, allowing developers to fix the code before it crashes the program.
 
